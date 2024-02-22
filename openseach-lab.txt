@@ -31,7 +31,7 @@ sudo sysctl -p
 
 sudo mkdir -p /data/opensearch
 sudo mkdir -p /data/logs/opensearch
-sudo chown -R opensearchuser.opensearchuser /data
+sudo chown -R opensearchuser:opensearchuser /data
 
 cat << EOF >> /home/opensearchuser/.bash_profile
 export OPENSEARCH_JAVA_HOME=/home/opensearchuser/opensearch/jdk
