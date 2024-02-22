@@ -5,11 +5,11 @@ hostnamectl set-hostname opensearch01 && sudo su -
 hostnamectl set-hostname opensearch02 && sudo su -
 hostnamectl set-hostname opensearch03 && sudo su -
 
-cat << EOF >> vi /etc/hosts
+sudo bash -c 'cat << EOF >> /etc/hosts
 10.0.2.31 opensearch01
 10.0.2.32 opensearch02
 10.0.2.33 opensearch03
-EOF
+EOF'
 
 groupadd -g 1001 opensearchuser
 useradd -m -g 1001 -u 1001 -c opensearchuser -s /bin/bash opensearchuser
@@ -19,9 +19,10 @@ echo "umask 0022" >> /home/opensearchuser/.bash_profile
 echo "opensearchuser ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/opensearchuser
 echo 'opensearchuser:12345a@' | sudo chpasswd
 
-cat << EOF >> vi /etc/sysctl.conf
+sudo bash -c 'cat << EOF >> /etc/sysctl.conf
 vm.max_map_count=262144
-EOF
+EOF'
+sudo sysctl -p
 
 cat << EOF >> /etc/security/limits.conf
 opensearchuser soft nofile 65536
@@ -66,16 +67,16 @@ WantedBy=multi-user.target
 EOF
 sudo systemctl daemon-reload
 
-mkdir -p /data/opensearch
-mkdir -p /data/logs/opensearch
-chown -R opensearchuser:opensearchuser /data
-
 sudo su - opensearchuser
 tar -xvf /tmp/opensearch-2.11.1-linux-x64.tar.gz -C /home/opensearchuser/
 ln -s /home/opensearchuser/opensearch-2.11.1/ /home/opensearchuser/opensearch
 mkdir -p /home/opensearchuser/opensearch/config/certs
 
+sshpass -p '12345a@' scp -o StrictHostKeyChecking=no /tmp/opensearch-2.11.1-linux-x64.tar.gz opensearchuser@opensearch02:/tmp
+sshpass -p '12345a@' scp -o StrictHostKeyChecking=no /tmp/opensearch-2.11.1-linux-x64.tar.gz opensearchuser@opensearch03:/tmp
+
 #JVM Config
+
 
 #Cert Config
 cat << EOF >> /home/opensearchuser/opensearch/config/certs/certs.sh
@@ -122,10 +123,11 @@ rm client.csr
 EOF
 
 cd /home/opensearchuser/opensearch/config/certs && sh certs.sh
-mv /home/opensearchuser/opensearch/config/opensearch.yml /home/opensearchuser/opensearch/config/opensearch.yml.bak
+
 
 sshpass -p '12345a@' scp -o StrictHostKeyChecking=no /home/opensearchuser/opensearch/config/certs/* opensearchuser@opensearch02:/home/opensearchuser/opensearch/config/certs/
 sshpass -p '12345a@' scp -o StrictHostKeyChecking=no /home/opensearchuser/opensearch/config/certs/* opensearchuser@opensearch03:/home/opensearchuser/opensearch/config/certs/
+mv /home/opensearchuser/opensearch/config/opensearch.yml /home/opensearchuser/opensearch/config/opensearch.yml.bak
 
 #Node 1
 cat << EOF >> /home/opensearchuser/opensearch/config/opensearch.yml
@@ -216,10 +218,12 @@ systemctl status opensearch.service
 
 ##Run SecurityAdmin
 chmod 755 /home/opensearchuser/opensearch/plugins/opensearch-security/tools/*.sh
-/home/opensearchuser/opensearch/plugins/opensearch-security/tools/securityadmin.sh -cd /home/opensearchuser/opensearch/plugins/opensearch-security -icl -nhnv \
-  -cacert /home/opensearchuser/opensearch/config/certs/root-ca.pem \
-  -cert /home/opensearchuser/opensearch/config/certs/admin.pem \
-  -key /home/opensearchuser/opensearch/config/certs/admin-key.pem
+
+cd /home/opensearchuser/opensearch/plugins/opensearch-security/tools/
+./securityadmin.sh -cd ../../../config/opensearch-security/ -icl -nhnv \
+  -cacert ../../../config/certs/root-ca.pem \
+  -cert ../../../config/certs/admin.pem \
+  -key ../../../config/certs/admin-key.pem
 
 # Add trust
 sudo cp /home/opensearchuser/opensearch/config/certs/root-ca.pem /etc/pki/ca-trust/source/anchors/
@@ -237,7 +241,7 @@ curl -XGET https://$HOSTNAME:9200/_cluster/state?pretty -u 'admin:admin'
 tar -zxf /tmp/opensearch-dashboards-2.11.1-linux-x64.tar.gz -C /home/opensearchuser
 ln -s /home/opensearchuser/opensearch-dashboards-2.11.1 /home/opensearchuser/dashboards
 
-cat << EOF >>/etc/systemd/system/opensearch-dashboard.service
+sudo bash -c 'cat << EOF >>/etc/systemd/system/opensearch-dashboard.service
 [Unit]
 Description=OpenSearch Dashboard
 Documentation=https://opensearch-dashboards.com/
@@ -249,29 +253,29 @@ Group=opensearchuser
 Restart=always
 [Install]
 WantedBy=multi-user.target
-EOF
+EOF'
 sudo systemctl daemon-reload
 
 mv /home/opensearchuser/dashboards/config/opensearch_dashboards.yml /home/opensearchuser/dashboards/config/opensearch_dashboards.yml.bak
 
+
 cat << EOF >> /home/opensearchuser/dashboards/config/opensearch_dashboards.yml
-opensearch.hosts: ["https://opensearch02:9200", "https://opensearch02:9200", "https://opensearch03:9200"]
-opensearch.ssl.certificateAuthorities: ["/path/to/root-ca.crt"]
-opensearch.ssl.certificate: "/path/to/opensearch-dashboards.crt"
-opensearch.ssl.key: "/path/to/opensearch-dashboards.key"
-opensearch.ssl.keyPassphrase: "your_key_passphrase"
-server.host: "0.0.0.0"
+opensearch.hosts: [ "https://opensearch01:9200", "https://opensearch02:9200", "https://opensearch03:9200" ]
+server.host: "opensearch01"
+server.port: 5601
+opensearch.username: admin
+opensearch.password: admin
+opensearch.ssl.verificationMode: full
+opensearch.requestHeadersWhitelist: [ authorization,securitytenant ]
+opensearch_security.cookie.secure: true
 server.ssl.enabled: true
-server.ssl.certificate: "/path/to/opensearch-dashboards.crt"
-server.ssl.key: "/path/to/opensearch-dashboards.key"
-opensearch_security.ssl.verificationMode: none
-opensearch_security.ssl.enabled: true
-opensearch_security.ssl.certificate: "/path/to/opensearch-dashboards.crt"
-opensearch_security.ssl.key: "/path/to/opensearch-dashboards.key"
-opensearch_security.ssl.certificateAuthorities: ["/path/to/root-ca.crt"]
-opensearch_security.ssl.keyPassphrase: "your_key_passphrase"
+server.ssl.certificate: /home/opensearchuser/opensearch/config/certs/admin.pem
+server.ssl.key: /home/opensearchuser/opensearch/config/certs/admin-key.pem
+opensearch.ssl.certificateAuthorities: [ "/home/opensearchuser/opensearch/config/certs/root-ca.pem" ]
 EOF
+
 
 sudo systemctl start opensearch-dashboard.service
 sudo systemctl status opensearch-dashboard.service
 sudo systemctl restart opensearch-dashboard
+sudo systemctl enable opensearch-dashboard
